@@ -122,12 +122,13 @@ class GitBranchesTest(unittest.TestCase):
 
 		repo_inst.provides("get_object").calls(get_object_fake)
 
-		gitbranches = syncgit.GitBranches("/path/to/repo", "^refs/remotes/origin/(int/.*|dev/ACME-[0-9]{1,}-.*)$", 42, "^refs/remotes/origin/int/")
+		gitbranches = syncgit.GitBranches("/path/to/repo", "^refs/remotes/origin/(int/.*|dev/ACME-[0-9]{1,}-.*)$", 42)
 
 		# get set of refs
 		branches = gitbranches.get_branches()
 
-		self.assertEquals(len(branches), 3, "There should be the correct number of branches")
+		self.assertEquals(len(branches), 4, "There should be the correct number of branches")
+		self.assertTrue("refs/remotes/origin/int/sprint-1" in branches, "The branch name should be correct")
 		self.assertTrue("refs/remotes/origin/int/sprint-2" in branches, "The branch name should be correct")
 		self.assertTrue("refs/remotes/origin/dev/ACME-987-branch" in branches, "The branch name should be correct")
 		self.assertTrue("refs/remotes/origin/dev/ACME-123-branch" in branches, "The branch name should be correct")
@@ -152,7 +153,7 @@ class GitJenkinsSyncTest(unittest.TestCase):
 		# mock constructor, return instance mock
 		self.mox.StubOutWithMock(syncgit, 'GitBranches')
 		(syncgit
-			.GitBranches("/path/to/repo", "^refs/remotes/origin/(int/.*|dev/ACME-[0-9]{1,}-.*)$", 42, "^refs/remotes/origin/int/")
+			.GitBranches("/path/to/repo", "^refs/remotes/origin/(int/.*|dev/ACME-[0-9]{1,}-.*)$", 42)
 			.AndReturn(mocked_gitbranches))
 
 
@@ -176,7 +177,7 @@ class GitJenkinsSyncTest(unittest.TestCase):
 
 		sync = syncgit.GitJenkinsSync(
 			"hostname", "/tmp/cli.jar", "/tmp/ssh-key", "TEMPLATE Build X", "BBBBBB", "Build X %s",
-			"/path/to/repo", "^refs/remotes/origin/(int/.*|dev/ACME-[0-9]{1,}-.*)$", 42, "^refs/remotes/origin/int/"
+			"/path/to/repo", "^refs/remotes/origin/(int/.*|dev/ACME-[0-9]{1,}-.*)$", 42
 		)
 
 		sync.sync()

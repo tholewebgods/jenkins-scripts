@@ -14,9 +14,6 @@ import xml.etree.ElementTree as ET
 # - The branch name pattern can be configured
 # - The template job name can be configured
 # - The branch name placeholder in the template job can be configured
-# - There are two types of branches: dev and integration branches
-# - Integration branches are treated differently - only one branch
-#   (general numerically sorted) the highest value will be fitered
 # - A branch is being ignored if the last commit is older than a configurable
 #   amount of days
 #
@@ -46,10 +43,6 @@ BRANCH_NAME_PLACEHOLDER="BBBBBBBBBB"
 
 # match these branch names
 REF_MATCHER="^refs/remotes/origin/((dev|bugfix)/PROJECT-[0-9]+|int/sprint/[0-9]+)"
-
-# match for integration branches
-# there might be only one integration branch at the time
-INT_BRANCH_MATCHER="^refs/remotes/origin/int/sprint/[0-9]+$"
 
 # ignore commits older than N days commit time
 MAX_COMMIT_AGE = 30
@@ -145,13 +138,11 @@ class GitBranches(object):
 		repo -- Repository location (relative or absolute paths)
 		ref_matcher -- A regular expression that matches branch names to create jobs for
 		max_commit_age -- Max days the last commit was made to a branch
-		int_branch_matcher -- A regular expression that identifies integration branches
 	"""
-	def __init__(self, repo, ref_matcher, max_commit_age, int_branch_matcher):
+	def __init__(self, repo, ref_matcher, max_commit_age):
 		self._repo = dulwich.repo.Repo(repo)
 		self._ref_matcher = ref_matcher
 		self._max_commit_age = max_commit_age
-		self._int_branch_matcher = int_branch_matcher
 
 	def get_branches(self):
 		_refs = []
@@ -164,7 +155,7 @@ class GitBranches(object):
 				_refs.append([ref, sha1, obj.commit_time])
 
 		# filter (ref, SHA1, commit time) tupel for outdated branches
-		refs = self._filter_branches(_refs)
+		refs = filter(lambda x: self._within_days(x[2], self._max_commit_age), _refs)
 
 		# extract ref
 		refs = set([x[0] for x in refs])
@@ -175,36 +166,12 @@ class GitBranches(object):
 	def _within_days(self, timestamp, days):
 		return datetime.datetime.fromtimestamp(timestamp) >= (datetime.datetime.now() + datetime.timedelta(days=-days))
 
-	# filter branches for commit age and
-	def _filter_branches(self, refs):
-		refs = filter(lambda x: self._within_days(x[2], self._max_commit_age), refs)
-
-		# sort
-		refs.sort()
-		# higher mumbers first
-		refs.reverse()
-
-		_refs = []
-		_saw_int_branch = False
-		for ref in refs:
-			if re.match(self._int_branch_matcher, ref[0]):
-				# ignore int-branches if we saw one already
-				if _saw_int_branch:
-					continue
-
-				_saw_int_branch = True
-			_refs.append(ref)
-
-		return _refs
-
-
-
 
 class GitJenkinsSync(object):
 
-	def __init__(self, host, cli_jar, ssh_key, job_tpl, branch_name_placeholder, job_name_tpl, repo, ref_matcher, max_commit_age, int_branch_matcher):
+	def __init__(self, host, cli_jar, ssh_key, job_tpl, branch_name_placeholder, job_name_tpl, repo, ref_matcher, max_commit_age):
 		self._jenkins = Jenkins(host, cli_jar, ssh_key, job_tpl, branch_name_placeholder, job_name_tpl)
-		self._git = GitBranches(repo, ref_matcher, max_commit_age, int_branch_matcher)
+		self._git = GitBranches(repo, ref_matcher, max_commit_age)
 
 	"""Do the actual sync. Query both sides, do diff/intersection and create/remove jobs"""
 	def sync(self):
@@ -241,7 +208,7 @@ def main():
 
 		JOB_TEMPLATE, BRANCH_NAME_PLACEHOLDER, JOB_NAME_TEMPLATE,
 
-		REPOSITORY_LOCATION, REF_MATCHER, MAX_COMMIT_AGE, INT_BRANCH_MATCHER
+		REPOSITORY_LOCATION, REF_MATCHER, MAX_COMMIT_AGE
 	)
 
 	sync.sync()
