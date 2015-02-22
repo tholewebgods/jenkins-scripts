@@ -3,9 +3,13 @@ import re
 import datetime
 import time
 import os
+import os.path
 import dulwich.repo
 import jenkinscli
 import xml.etree.ElementTree as ET
+import sys
+import argparse
+import textwrap
 
 # This script will create jobs for each remote branch found in the repository
 # in the current directory. It will also remove the jobs if the branches are
@@ -23,29 +27,12 @@ import xml.etree.ElementTree as ET
 # - py-jenkins-cli (https://github.com/tholewebgods/py-jenkins-cli)
 #
 
-# path to the repository. usually "." when this script is run in a
-# job that just checks out the branches
-REPOSITORY_LOCATION = "."
+BINARY_NAME="syncgit"
+VERSION="0.1"
 
-# Jenkins host URL
-JENKINS_HOST = "http://localhost:8080/"
-# Path to the private SSH key file
-JENKINS_SSH_KEY = "/path/to/id_rsa_local_jenkins_auth"
-# Path to the Jenkins CLI .jar
-JENKINS_CLI_JAR = "/tmp/jenkins-cli.jar"
+# Default for max. commit age of a branch
+DEFAULT_MAX_COMMIT_AGE=30
 
-# the job name used as a template (this job might/should be disabled)
-JOB_TEMPLATE = "TEMPLATE Build project X"
-# the job name template to create jobs
-# (%s is the placeholder for the branch name)
-JOB_NAME_TEMPLATE = "Build Build project X %s"
-BRANCH_NAME_PLACEHOLDER="BBBBBBBBBB"
-
-# match these branch names
-REF_MATCHER="^refs/remotes/origin/((dev|bugfix)/PROJECT-[0-9]+|int/sprint/[0-9]+)"
-
-# ignore commits older than N days commit time
-MAX_COMMIT_AGE = 30
 
 class Jenkins(object):
 
@@ -202,20 +189,120 @@ class GitJenkinsSync(object):
 		else:
 			print "No branch jobs to create."
 
-def main():
+class CustomParser(argparse.ArgumentParser):
+
+	# extend help screen to print more
+	def print_help(self):
+		super(CustomParser, self).print_help()
+		print "example usage:"
+		print """
+Create a job named "Build Project XYZ TEMPLATE" and set "BBBBB" in the Git
+config section for the branch name.
+
+  %s --host http://localhost:8080/ --key /home/jenkins/.ssh/id_rsa_local \\
+   --jar /tmp/jenkins_cli.jar --tpl-job "Build Project XYZ TEMPLATE" \\
+   --job-name-tpl "Build Project XYZ %%s" --branch-placeholder "BBBBB" \\
+   --ref-regex "^refs/remotes/origin/((dev|bugfix)/ACME-[0-9]+|int/[0-9]+)" \\
+   --git-repo /tmp/sync-checkout --max-commit-age 14
+
+This will create jobs named like "Build Project XYZ dev-ACME-123-name"
+		""" % (BINARY_NAME)
+
+
+# Validating store action for --max-commit-age
+class MaxAgeSwitchAction(argparse.Action):
+	def __call__(self, parser, namespace, values, option_string=None):
+		if values > 1000 or values < 1:
+			raise Exception("Max commit age %d exceeds 1 - 1000" % values)
+
+		setattr(namespace, self.dest, values)
+
+# Internal exception
+class ArgumentValidationException(Exception):
+
+	def __init__(self, msg):
+		super(ArgumentValidationException, self).__init__(msg)
+
+def _validate_arguments(parsed):
+	if not os.path.exists(parsed.ssh_key):
+		raise ArgumentValidationException("SSH Key does not exist: " + parsed.ssh_key)
+
+	if not os.path.exists(parsed.jar):
+		raise ArgumentValidationException("Jenkins CLI .jar does not exist: " + parsed.jar)
+
+	if parsed.jobname_tpl.count("%s") != 1:
+		raise ArgumentValidationException("Expected one \"%s\" placeholder in the job name template.")
+
+	if not os.path.exists(parsed.git_repo_path):
+		raise ArgumentValidationException("Git directory does not exist: " + parsed.git_repo_path)
+
+	try:
+		re.match(parsed.ref_regex, "")
+	except Exception as e:
+		raise ArgumentValidationException("Malformed regular expression '" + parsed.ref_regex + "': " + str(e))
+
+
+def main(args):
+		# add_help=False,
+	parser = CustomParser(
+		prog=BINARY_NAME,
+		description="Sync Git branches by branch name pattern with corresponding jobs in Jenkins"
+	)
+
+	parser.add_argument( '-V','--version', action='version', version='%(prog)s ' + VERSION)
+
+	parser.add_argument(
+		'-J', '--host', dest="jenkins_host", action='store', metavar="URL", required=True,
+		help="URL to Jenkins in form <protocol>://<host>[:port][<path>]/"
+	)
+	parser.add_argument(
+		'-S', '--key', dest="ssh_key", action='store', metavar="PATH", required=True,
+		help="Path to the SSH key used for authentication"
+	)
+	parser.add_argument(
+		'-j', '--jar', dest="jar", action='store', metavar="PATH", required=True,
+		help="Path to the Jenkins CLI .jar"
+	)
+	parser.add_argument(
+		'-G', '--git-repo', dest="git_repo_path", action='store', metavar="PATH", required=True,
+		help="Path to the Git repository"
+	)
+	parser.add_argument(
+		'-T', '--tpl-job', dest="tpl_job", action='store', metavar="JOBNAME", required=True,
+		help="Name of the job used as template"
+	)
+	parser.add_argument(
+		'-n', '--job-name-tpl', dest="jobname_tpl", action='store', metavar="NAME", required=True,
+		help="Name template for the jobs being created, should contain \"%%s\" as placeholder for the branch name"
+	)
+	parser.add_argument(
+		'-B', '--branch-placeholder', dest="branch_name_placeholder", action='store', metavar="STRING", required=True,
+		help="Placeholder for the branch name in the template job's config"
+	)
+	parser.add_argument(
+		'-R', '--ref-regex', dest="ref_regex", action='store', metavar="REGEX", required=True,
+		help="Regular expression matching the branch names to create jobs for"
+	)
+	parser.add_argument(
+		'-a', '--max-commit-age', dest="max_commit_age", action=MaxAgeSwitchAction, type=int, metavar="DAYS", required=False,
+		help="Max days the last commit was made on a branch. Defaults to %d" % DEFAULT_MAX_COMMIT_AGE
+	)
+
+	parsed = parser.parse_args(args)
+
+	_validate_arguments(parsed)
+
 	sync = GitJenkinsSync(
-		JENKINS_HOST, JENKINS_CLI_JAR, JENKINS_SSH_KEY,
-
-		JOB_TEMPLATE, BRANCH_NAME_PLACEHOLDER, JOB_NAME_TEMPLATE,
-
-		REPOSITORY_LOCATION, REF_MATCHER, MAX_COMMIT_AGE
+		parsed.jenkins_host, parsed.jar, parsed.ssh_key,
+		parsed.tpl_job, parsed.branch_name_placeholder, parsed.jobname_tpl,
+		parsed.git_repo_path, parsed.ref_regex, parsed.max_commit_age
 	)
 
 	sync.sync()
 
 if __name__ == "__main__":
 	try:
-		main()
+		main(sys.argv[1:])
 	except Exception as e:
 		print "Error occured: %s" % str(e)
 

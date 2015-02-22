@@ -2,6 +2,10 @@
 import unittest
 import fudge
 import mox
+import re
+
+import os.path
+import sys
 
 import syncgit
 
@@ -183,3 +187,177 @@ class GitJenkinsSyncTest(unittest.TestCase):
 		sync.sync()
 
 		self.mox.VerifyAll()
+
+
+class MainTest(unittest.TestCase):
+
+	def setUp(self):
+		self.mox = mox.Mox()
+
+	def tearDown(self):
+		self.mox.UnsetStubs()
+
+	# Create Mock for exists(). Run in replay mode.
+	# Intermediate return values for that mock are set to None to allow the mocked exists() to always return the latest value.
+	# - mock_number - is the number of the mock, zero indexed (when two other mocks have been created before, it should be 2)
+	# - fn - is the function to call when the path to exists() matches /path (used for testss)
+	def _mock_exists(self, mock_number, fn):
+		# mock os.path.exists()
+		self.mox.StubOutWithMock(os.path, 'exists')
+
+		mox_ = self.mox
+
+		def exists(path):
+			# Always reset return values (0=GitJenkinsSync(), 1=sync(), 2=exists())
+			for method in mox_._mock_objects[mock_number]._expected_calls_queue[0]._methods:
+				method._return_value = None
+
+			# print "exists(%s)" % path
+			if not re.match("^/path.*$", path):
+				# print "  not /path..."
+				orig_exists = filter(lambda x: x[2] == "exists", mox_.stubs.cache)[0][1]
+				# print "  " + str(orig_exists)
+				ret = orig_exists(path)
+				# print "  ret=" + str(ret)
+				return ret
+			else:
+				# print "  is /path..."
+				return fn(path)
+
+		os.path.exists(mox.Regex("^.*$")).MultipleTimes().WithSideEffects(exists)
+
+
+	"""When all arguments are OK it should run the constructor and sync()"""
+	def test_aguments_all_ok(self):
+		# mock
+		mocked_sync = self.mox.CreateMock(syncgit.GitJenkinsSync)
+
+		# expect
+		self.mox.StubOutWithMock(syncgit, 'GitJenkinsSync')
+		(syncgit
+			.GitJenkinsSync(
+				"http://localhost:8080/", "/path/to/jar", "/path/to/key",
+				"Template Job", "BBBBB", "Job %s",
+				"/path/to/git", "^dev/.*$", 30
+			)
+			.AndReturn(mocked_sync))
+
+		# expect
+		mocked_sync.sync()
+
+
+		self._mock_exists(2, lambda path: True)
+
+
+		self.mox.ReplayAll()
+
+		syncgit.main([
+			"-J", "http://localhost:8080/", "-S", "/path/to/key", "-j", "/path/to/jar",
+			"-G", "/path/to/git", "-T", "Template Job", "-n", "Job %s", "-B", "BBBBB",
+			"-R", "^dev/.*$", "-a", "30"
+		])
+
+		self.mox.VerifyAll()
+
+
+	"""When argument "jar" is bad it should not run the constructor and exit()"""
+	def test_aguments_jar_not_found(self):
+		self.mox.StubOutWithMock(syncgit, 'GitJenkinsSync')
+
+		self._mock_exists(1, lambda path: path != "/path/to/jar")
+
+		self.mox.ReplayAll()
+
+		def _should_raise():
+			syncgit.main([
+				"-J", "http://localhost:8080/", "-S", "/path/to/key", "-j", "/path/to/jar",
+				"-G", "/path/to/git", "-T", "Template Job", "-n", "Job %s", "-B", "BBBBB",
+				"-R", "^dev/.*$", "-a", "30"
+			])
+
+		self.assertRaises(syncgit.ArgumentValidationException, _should_raise)
+
+		self.mox.VerifyAll()
+
+
+	"""When argument "key" is bad it should not run the constructor and exit()"""
+	def test_aguments_key_not_found(self):
+		self.mox.StubOutWithMock(syncgit, 'GitJenkinsSync')
+
+		self._mock_exists(1, lambda path: path != "/path/to/key")
+
+		self.mox.ReplayAll()
+
+		def _should_raise():
+			syncgit.main([
+				"-J", "http://localhost:8080/", "-S", "/path/to/key", "-j", "/path/to/jar",
+				"-G", "/path/to/git", "-T", "Template Job", "-n", "Job %s", "-B", "BBBBB",
+				"-R", "^dev/.*$", "-a", "30"
+			])
+
+		self.assertRaises(syncgit.ArgumentValidationException, _should_raise)
+
+		self.mox.VerifyAll()
+
+
+	"""When argument "repo" (Git) is bad it should not run the constructor and exit()"""
+	def test_aguments_git_not_found(self):
+		self.mox.StubOutWithMock(syncgit, 'GitJenkinsSync')
+
+		self._mock_exists(1, lambda path: path != "/path/to/git")
+
+		self.mox.ReplayAll()
+
+		def _should_raise():
+			syncgit.main([
+				"-J", "http://localhost:8080/", "-S", "/path/to/key", "-j", "/path/to/jar",
+				"-G", "/path/to/git", "-T", "Template Job", "-n", "Job %s", "-B", "BBBBB",
+				"-R", "^dev/.*$", "-a", "30"
+			])
+
+		self.assertRaises(syncgit.ArgumentValidationException, _should_raise)
+
+		self.mox.VerifyAll()
+
+
+	"""When argument "placholder" is bad it should not run the constructor and exit()"""
+	def test_aguments_no_placeholder_in_tpl_jobname(self):
+		self.mox.StubOutWithMock(syncgit, 'GitJenkinsSync')
+
+		self._mock_exists(1, lambda path: True)
+
+		self.mox.ReplayAll()
+
+		def _should_raise():
+			syncgit.main([
+				"-J", "http://localhost:8080/", "-S", "/path/to/key", "-j", "/path/to/jar",
+				"-G", "/path/to/git", "-T", "Template Job", "-n", "Job NO-PLACEHOLDER", "-B", "BBBBB",
+				"-R", "^dev/.*$", "-a", "30"
+			])
+
+		self.assertRaises(syncgit.ArgumentValidationException, _should_raise)
+
+		self.mox.VerifyAll()
+
+
+	"""When argument "regex" is bad it should not run the constructor and exit()"""
+	def test_aguments_malformed_regex(self):
+		self.mox.StubOutWithMock(syncgit, 'GitJenkinsSync')
+
+		self._mock_exists(1, lambda path: True)
+
+		self.mox.ReplayAll()
+
+		def _should_raise():
+			syncgit.main([
+				"-J", "http://localhost:8080/", "-S", "/path/to/key", "-j", "/path/to/jar",
+				"-G", "/path/to/git", "-T", "Template Job", "-n", "Job %s", "-B", "BBBBB",
+				"-R", "^dev(REGEX-PAREN-UNBALANCED", "-a", "30"
+			])
+
+		self.assertRaises(syncgit.ArgumentValidationException, _should_raise)
+
+		self.mox.VerifyAll()
+
+
+unittest.main()
