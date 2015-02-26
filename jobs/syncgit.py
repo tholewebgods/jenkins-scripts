@@ -17,7 +17,6 @@ import textwrap
 #
 # - The branch name pattern can be configured
 # - The template job name can be configured
-# - The branch name placeholder in the template job can be configured
 # - A branch is being ignored if the last commit is older than a configurable
 #   amount of days
 #
@@ -40,14 +39,12 @@ class Jenkins(object):
 		Jenkins job management.
 
 		- job_tpl -- the exact job name used as a template (this job might/should be disabled)
-		- branch_name_placeholder -- the string within the job template that will be replaced with the branch name
 		- job_name_tpl -- the resulting job name, has to contain one "%s" placeholder that will be replaced with the sanitized branch name
 	"""
-	def __init__(self, host, cli_jar, ssh_key, job_tpl, branch_name_placeholder, job_name_tpl):
+	def __init__(self, host, cli_jar, ssh_key, job_tpl, job_name_tpl):
 		self._jenkins = jenkinscli.JenkinsCli(host, cli_jar, ssh_key)
 
 		self._job_template = job_tpl
-		self._branch_name_placeholder = branch_name_placeholder
 		self._job_name_tpl = job_name_tpl
 
 
@@ -57,7 +54,24 @@ class Jenkins(object):
 	def create_job(self, ref_name):
 		# load template and replace placeholder in config
 		config_template = self._jenkins.get_job(self._job_template)
-		config = config_template.replace(self._branch_name_placeholder, ref_name)
+
+		# deserialize
+		root = ET.fromstring(config_template)
+
+		xpath = ".//scm/branches/hudson.plugins.git.BranchSpec/name"
+
+		# get branch name config node
+		name_element = root.findall(xpath)
+
+		# check if a "name" node has been selected
+		if len(name_element) > 0:
+			# set branch name config
+			name_element[0].text = ref_name
+		else:
+			raise Exception("Missing Git branch spec config in config template (xpath: %s)" % (xpath))
+
+		# serialize DOM
+		config = ET.tostring(root)
 
 		# replace slashes in ref name to  get clean job name and build job name
 		filtered_ref_name = ref_name.replace("origin/", "")
@@ -156,8 +170,8 @@ class GitBranches(object):
 
 class GitJenkinsSync(object):
 
-	def __init__(self, host, cli_jar, ssh_key, job_tpl, branch_name_placeholder, job_name_tpl, repo, ref_matcher, max_commit_age):
-		self._jenkins = Jenkins(host, cli_jar, ssh_key, job_tpl, branch_name_placeholder, job_name_tpl)
+	def __init__(self, host, cli_jar, ssh_key, job_tpl, job_name_tpl, repo, ref_matcher, max_commit_age):
+		self._jenkins = Jenkins(host, cli_jar, ssh_key, job_tpl, job_name_tpl)
 		self._git = GitBranches(repo, ref_matcher, max_commit_age)
 
 	"""Do the actual sync. Query both sides, do diff/intersection and create/remove jobs"""
@@ -201,9 +215,9 @@ config section for the branch name.
 
   %s --host http://localhost:8080/ --key /home/jenkins/.ssh/id_rsa_local \\
    --jar /tmp/jenkins_cli.jar --tpl-job "Build Project XYZ TEMPLATE" \\
-   --job-name-tpl "Build Project XYZ %%s" --branch-placeholder "BBBBB" \\
+   --job-name-tpl "Build Project XYZ %%s" --git-repo /tmp/sync-checkout \\
    --ref-regex "^refs/remotes/origin/((dev|bugfix)/ACME-[0-9]+|int/[0-9]+)" \\
-   --git-repo /tmp/sync-checkout --max-commit-age 14
+   --max-commit-age 14
 
 This will create jobs named like "Build Project XYZ dev-ACME-123-name"
 		""" % (BINARY_NAME)
@@ -276,10 +290,6 @@ def main(args):
 		help="Name template for the jobs being created, should contain \"%%s\" as placeholder for the branch name"
 	)
 	parser.add_argument(
-		'-B', '--branch-placeholder', dest="branch_name_placeholder", action='store', metavar="STRING", required=True,
-		help="Placeholder for the branch name in the template job's config"
-	)
-	parser.add_argument(
 		'-R', '--ref-regex', dest="ref_regex", action='store', metavar="REGEX", required=True,
 		help="Regular expression matching the branch names to create jobs for"
 	)
@@ -294,7 +304,7 @@ def main(args):
 
 	sync = GitJenkinsSync(
 		parsed.jenkins_host, parsed.jar, parsed.ssh_key,
-		parsed.tpl_job, parsed.branch_name_placeholder, parsed.jobname_tpl,
+		parsed.tpl_job, parsed.jobname_tpl,
 		parsed.git_repo_path, parsed.ref_regex, parsed.max_commit_age
 	)
 

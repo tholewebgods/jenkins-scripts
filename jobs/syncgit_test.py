@@ -18,18 +18,18 @@ class JenkinsTest(unittest.TestCase):
 
 		(jenkinscli_inst.expects("get_job")
 			.with_args("TEMPLATE Build X")
-			.returns("<config><branch>BBBBBB</branch></config>"))
+			.returns('<project><scm class="hudson.plugins.git.GitSCM" plugin="git@2.3.1"><branches><hudson.plugins.git.BranchSpec><name>*/master</name></hudson.plugins.git.BranchSpec></branches></scm></project>'))
 
 		(jenkinscli_inst.expects("create_job")
 			.with_args(
 				"Build X dev-ACME-123-branch",
-				"<config><branch>origin/dev/ACME-123-branch</branch></config>"
+				'<project><scm class="hudson.plugins.git.GitSCM" plugin="git@2.3.1"><branches><hudson.plugins.git.BranchSpec><name>origin/dev/ACME-123-branch</name></hudson.plugins.git.BranchSpec></branches></scm></project>'
 			))
 
 		(jenkinscli_inst.expects("enable_job")
 			.with_args("Build X dev-ACME-123-branch"))
 
-		jenkins = syncgit.Jenkins("hostname", "/tmp/cli.jar", "/tmp/ssh-key", "TEMPLATE Build X", "BBBBBB", "Build X %s")
+		jenkins = syncgit.Jenkins("hostname", "/tmp/cli.jar", "/tmp/ssh-key", "TEMPLATE Build X", "Build X %s")
 
 		jenkins.create_job("origin/dev/ACME-123-branch")
 
@@ -41,7 +41,7 @@ class JenkinsTest(unittest.TestCase):
 		(jenkinscli_inst.expects("delete_job")
 			.with_args("Build X dev-ACME-123-branch"))
 
-		jenkins = syncgit.Jenkins("hostname", "/tmp/cli.jar", "/tmp/ssh-key", "TEMPLATE Build X", "BBBBBB", "Build X %s")
+		jenkins = syncgit.Jenkins("hostname", "/tmp/cli.jar", "/tmp/ssh-key", "TEMPLATE Build X", "Build X %s")
 
 		jenkins.remove_job("origin/dev/ACME-123-branch")
 
@@ -82,7 +82,7 @@ class JenkinsTest(unittest.TestCase):
 
 		jenkinscli_inst.provides("get_job").calls(get_job_fake)
 
-		jenkins = syncgit.Jenkins("hostname", "/tmp/cli.jar", "/tmp/ssh-key", "TEMPLATE Build X", "BBBBBB", "Build X %s")
+		jenkins = syncgit.Jenkins("hostname", "/tmp/cli.jar", "/tmp/ssh-key", "TEMPLATE Build X", "Build X %s")
 
 		jenkins.get_currently_configured_branches()
 
@@ -173,14 +173,14 @@ class GitJenkinsSyncTest(unittest.TestCase):
 		# mock constructor, return instance mock
 		self.mox.StubOutWithMock(syncgit, 'Jenkins')
 		(syncgit
-			.Jenkins("hostname", "/tmp/cli.jar", "/tmp/ssh-key", "TEMPLATE Build X", "BBBBBB", "Build X %s")
+			.Jenkins("hostname", "/tmp/cli.jar", "/tmp/ssh-key", "TEMPLATE Build X", "Build X %s")
 			.AndReturn(mocked_jenkins))
 
 
 		self.mox.ReplayAll()
 
 		sync = syncgit.GitJenkinsSync(
-			"hostname", "/tmp/cli.jar", "/tmp/ssh-key", "TEMPLATE Build X", "BBBBBB", "Build X %s",
+			"hostname", "/tmp/cli.jar", "/tmp/ssh-key", "TEMPLATE Build X", "Build X %s",
 			"/path/to/repo", "^refs/remotes/origin/(int/.*|dev/ACME-[0-9]{1,}-.*)$", 42
 		)
 
@@ -237,7 +237,7 @@ class MainTest(unittest.TestCase):
 		(syncgit
 			.GitJenkinsSync(
 				"http://localhost:8080/", "/path/to/jar", "/path/to/key",
-				"Template Job", "BBBBB", "Job %s",
+				"Template Job", "Job %s",
 				"/path/to/git", "^dev/.*$", 30
 			)
 			.AndReturn(mocked_sync))
@@ -253,7 +253,7 @@ class MainTest(unittest.TestCase):
 
 		syncgit.main([
 			"-J", "http://localhost:8080/", "-S", "/path/to/key", "-j", "/path/to/jar",
-			"-G", "/path/to/git", "-T", "Template Job", "-n", "Job %s", "-B", "BBBBB",
+			"-G", "/path/to/git", "-T", "Template Job", "-n", "Job %s",
 			"-R", "^dev/.*$", "-a", "30"
 		])
 
@@ -271,7 +271,7 @@ class MainTest(unittest.TestCase):
 		def _should_raise():
 			syncgit.main([
 				"-J", "http://localhost:8080/", "-S", "/path/to/key", "-j", "/path/to/jar",
-				"-G", "/path/to/git", "-T", "Template Job", "-n", "Job %s", "-B", "BBBBB",
+				"-G", "/path/to/git", "-T", "Template Job", "-n", "Job %s",
 				"-R", "^dev/.*$", "-a", "30"
 			])
 
@@ -291,7 +291,7 @@ class MainTest(unittest.TestCase):
 		def _should_raise():
 			syncgit.main([
 				"-J", "http://localhost:8080/", "-S", "/path/to/key", "-j", "/path/to/jar",
-				"-G", "/path/to/git", "-T", "Template Job", "-n", "Job %s", "-B", "BBBBB",
+				"-G", "/path/to/git", "-T", "Template Job", "-n", "Job %s",
 				"-R", "^dev/.*$", "-a", "30"
 			])
 
@@ -311,7 +311,7 @@ class MainTest(unittest.TestCase):
 		def _should_raise():
 			syncgit.main([
 				"-J", "http://localhost:8080/", "-S", "/path/to/key", "-j", "/path/to/jar",
-				"-G", "/path/to/git", "-T", "Template Job", "-n", "Job %s", "-B", "BBBBB",
+				"-G", "/path/to/git", "-T", "Template Job", "-n", "Job %s",
 				"-R", "^dev/.*$", "-a", "30"
 			])
 
@@ -331,7 +331,7 @@ class MainTest(unittest.TestCase):
 		def _should_raise():
 			syncgit.main([
 				"-J", "http://localhost:8080/", "-S", "/path/to/key", "-j", "/path/to/jar",
-				"-G", "/path/to/git", "-T", "Template Job", "-n", "Job NO-PLACEHOLDER", "-B", "BBBBB",
+				"-G", "/path/to/git", "-T", "Template Job", "-n", "Job NO-PLACEHOLDER",
 				"-R", "^dev/.*$", "-a", "30"
 			])
 
@@ -351,7 +351,7 @@ class MainTest(unittest.TestCase):
 		def _should_raise():
 			syncgit.main([
 				"-J", "http://localhost:8080/", "-S", "/path/to/key", "-j", "/path/to/jar",
-				"-G", "/path/to/git", "-T", "Template Job", "-n", "Job %s", "-B", "BBBBB",
+				"-G", "/path/to/git", "-T", "Template Job", "-n", "Job %s",
 				"-R", "^dev(REGEX-PAREN-UNBALANCED", "-a", "30"
 			])
 
